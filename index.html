@@ -1,0 +1,2014 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EasyPrivacy - Privacy Education Platform</title>
+    <link rel="stylesheet" href="style.css">
+    
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
+</head>
+
+<body>
+    <div class="app">
+        
+        <header class="header">
+            <div class="header-content">
+                <div class="logo" onclick="showHome()">
+                    EasyPrivacy
+                    <span>beta</span>
+                </div>
+
+                <nav class="nav">
+                    <button class="nav-item active" onclick="showWiki()">Wiki</button>
+                    <button class="nav-item" onclick="showForum()">Forum</button>
+                    <button class="nav-item" onclick="showQueue()" id="queueNavItem" style="display: none;">Edit
+                        Queue</button>
+                    <button class="nav-item" onclick="showModeration()" id="modNavItem"
+                        style="display: none;">Moderation</button>
+                </nav>
+
+                <div class="search-container">
+                    <div class="search-box">
+                        <input type="text" placeholder="Search wiki and forum..." id="searchInput"
+                            onkeypress="handleSearchKeypress(event)">
+                        <button onclick="performSearch()">🔍</button>
+                    </div>
+                </div>
+
+                
+                <div class="user-menu" id="userMenu">
+                    <button class="btn btn-secondary" onclick="showLoginForm()" id="loginBtn">Login</button>
+                    <button class="btn btn-primary" onclick="showRegisterForm()" id="registerBtn">Register</button>
+                    <div class="user-dropdown" id="userDropdown" style="display: none;">
+                        <button class="user-dropdown-toggle" onclick="toggleUserDropdown()">
+                            <span id="usernameDisplay"></span> ▼
+                        </button>
+                        <div class="user-dropdown-menu" id="userDropdownMenu">
+                            <div class="user-info">
+                                <strong id="dropdownUsername"></strong><br>
+                                <span id="userRoles"></span>
+                            </div>
+                            <div class="dropdown-divider"></div>
+                            <a onclick="showProfile()">Profile</a>
+                            <a onclick="showMyPosts()">My Posts</a>
+                            <a onclick="showMyEdits()">My Wiki Edits</a>
+                            <div class="dropdown-divider"></div>
+                            <a onclick="logout()">Logout</a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        
+        <div class="main-container">
+            
+            <aside class="sidebar" id="wikiSidebar">
+                <div class="sidebar-section">
+                    <h3 class="sidebar-title">Wiki Articles</h3>
+                    <div id="articleList" class="article-list">
+                        <div class="loading-spinner"></div>
+                        <div>Loading articles...</div>
+                    </div>
+                </div>
+
+                <div class="sidebar-section">
+                    <h3 class="sidebar-title">Quick Actions</h3>
+                    <div style="padding: 0.5rem;">
+                        <button class="btn btn-primary" style="width: 100%; margin-bottom: 0.5rem;"
+                            onclick="showNewArticleForm()" id="newArticleBtn">
+                            + New Wiki Article
+                        </button>
+                        <button class="btn btn-secondary" style="width: 100%;" onclick="showForum()">
+                            View Forum
+                        </button>
+                    </div>
+                </div>
+
+                <div class="privacy-notice">
+                    🔒 Your data is private
+                </div>
+            </aside>
+
+            
+            <main class="main-content" id="mainContent">
+                <div class="loading">
+                    <div class="loading-spinner"></div>
+                    <div>Loading EasyPrivacy...</div>
+                </div>
+            </main>
+        </div>
+
+       
+        <div class="rate-limit-info" id="rateLimitInfo">
+            ⚡ Rate limit: <span id="rateLimitCount">50</span> actions remaining
+        </div>
+
+       
+        <footer class="footer">
+            <div class="footer-content">
+                <div>© 2026 EasyPrivacy - Community-driven privacy education</div>
+                <div class="footer-links">
+                    <a onclick="showPrivacy()">Privacy Policy</a>
+                    <a onclick="showAbout()">About</a>
+                    <a onclick="showGuidelines()">Guidelines</a>
+                    <a onclick="showGit()">Git Repository</a>
+                </div>
+            </div>
+        </footer>
+    </div>
+
+    <script>
+        // API Configuration
+        const API_BASE_URL = `${window.location.origin}/api`;
+        // State management
+        let currentView = 'wiki';
+        let currentArticle = null;
+        let currentPostId = null;
+        let currentEditId = null;
+        let rateLimit = 50;
+        let currentUser = null;
+        let wikiArticles = [];
+        let currentReplyParentId = null;
+        let lastStableView = 'wiki';
+        let categoriesCache = [];
+        let currentModerationUserId = null;
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', function () {
+            console.log('🚀 EasyPrivacy Frontend Starting...');
+            checkAuthStatus();
+            loadWikiArticleList();
+            setupEventListeners();
+        });
+
+        // ==================== AUTHENTICATION ====================
+
+        async function checkAuthStatus() {
+            try {
+                const response = await fetch(`${API_BASE_URL}/auth/me`, {
+                    credentials: 'include',
+                    mode: 'cors'
+                });
+                if (!response.ok) return;
+
+                const data = await response.json();
+                currentUser = data.user || null;
+                updateUIBasedOnAuth();
+
+                if (currentUser) {
+                    console.log('✅ Logged in as:', currentUser.username);
+                } else {
+                    console.log('👤 Not logged in');
+                }
+            } catch (error) {
+                console.error('Auth check failed:', error);
+            }
+        }
+
+        function escapeHtml(value = '') {
+            return String(value)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
+        function renderMarkdownSafe(markdownText = '') {
+            const rawHtml = marked.parse(markdownText || '');
+            return DOMPurify.sanitize(rawHtml);
+        }
+
+        function getButtonFromEvent(fallbackSelector) {
+            if (window.event?.target instanceof HTMLElement) return window.event.target;
+            return fallbackSelector ? document.querySelector(fallbackSelector) : null;
+        }
+
+        function updateUIBasedOnAuth() {
+            const loginBtn = document.getElementById('loginBtn');
+            const registerBtn = document.getElementById('registerBtn');
+            const userDropdown = document.getElementById('userDropdown');
+            const usernameDisplay = document.getElementById('usernameDisplay');
+            const dropdownUsername = document.getElementById('dropdownUsername');
+            const userRoles = document.getElementById('userRoles');
+            const queueNavItem = document.getElementById('queueNavItem');
+            const modNavItem = document.getElementById('modNavItem');
+            const newArticleBtn = document.getElementById('newArticleBtn');
+
+            if (currentUser) {
+                loginBtn.style.display = 'none';
+                registerBtn.style.display = 'none';
+                userDropdown.style.display = 'block';
+                usernameDisplay.textContent = currentUser.username;
+                dropdownUsername.textContent = currentUser.username;
+
+                let roles = [];
+                if (currentUser.is_admin) roles.push('<span class="role-badge admin">Admin</span>');
+                if (currentUser.is_moderator) roles.push('<span class="role-badge moderator">Mod</span>');
+                if (currentUser.is_contributor) roles.push('<span class="role-badge contributor">Contributor</span>');
+                userRoles.innerHTML = roles.join(' ');
+
+                if (currentUser.is_contributor || currentUser.is_moderator || currentUser.is_admin) {
+                    queueNavItem.style.display = 'block';
+                    newArticleBtn.style.display = 'block';
+                } else {
+                    queueNavItem.style.display = 'none';
+                    newArticleBtn.style.display = 'none';
+                }
+
+                if (currentUser.is_moderator || currentUser.is_admin) {
+                    modNavItem.style.display = 'block';
+                } else {
+                    modNavItem.style.display = 'none';
+                }
+            } else {
+                loginBtn.style.display = 'block';
+                registerBtn.style.display = 'block';
+                userDropdown.style.display = 'none';
+                queueNavItem.style.display = 'none';
+                modNavItem.style.display = 'none';
+                newArticleBtn.style.display = 'none';
+            }
+        }
+
+        function toggleUserDropdown() {
+            const menu = document.getElementById('userDropdownMenu');
+            menu.classList.toggle('show');
+        }
+
+        document.addEventListener('click', function (event) {
+            const dropdown = document.getElementById('userDropdownMenu');
+            const toggle = document.querySelector('.user-dropdown-toggle');
+            if (dropdown && toggle && !toggle.contains(event.target) && !dropdown.contains(event.target)) {
+                dropdown.classList.remove('show');
+            }
+        });
+
+        function showLoginForm() {
+            const mainContent = document.getElementById('mainContent');
+            mainContent.innerHTML = `
+                <div class="auth-form">
+                    <h2>Login to EasyPrivacy</h2>
+                    <div class="form-group">
+                        <label class="form-label">Username or Email</label>
+                        <input type="text" id="loginUsername" class="form-input" placeholder="Enter username or email">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Password</label>
+                        <input type="password" id="loginPassword" class="form-input" placeholder="Enter password">
+                    </div>
+                    <button class="btn btn-primary" id="loginSubmitBtn" onclick="login()">Login</button>
+                    <div class="auth-switch">
+                        Don't have an account? <a onclick="showRegisterForm()">Register</a>
+                    </div>
+                </div>
+            `;
+        }
+
+        async function login() {
+            const username = document.getElementById('loginUsername').value;
+            const password = document.getElementById('loginPassword').value;
+
+            if (!username || !password) {
+                showToast('Username and password required', 'warning');
+                return;
+            }
+
+            const loginBtn = getButtonFromEvent('#loginSubmitBtn');
+            const originalText = loginBtn ? loginBtn.textContent : 'Login';
+            if (loginBtn) {
+                loginBtn.textContent = 'Logging in...';
+                loginBtn.disabled = true;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/auth/login`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, password }),
+                    credentials: 'include',
+                    mode: 'cors'
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    currentUser = data.user;
+                    updateUIBasedOnAuth();
+                    showToast('Login successful!');
+                    showHome();
+                } else {
+                    showToast(data.error || 'Login failed', 'error');
+                }
+            } catch (error) {
+                console.error('Login error:', error);
+                showToast('Login failed: ' + error.message, 'error');
+            } finally {
+                if (loginBtn) {
+                    loginBtn.textContent = originalText;
+                    loginBtn.disabled = false;
+                }
+            }
+        }
+
+        function showRegisterForm() {
+            const mainContent = document.getElementById('mainContent');
+            mainContent.innerHTML = `
+                <div class="auth-form">
+                    <h2>Create Account</h2>
+                    <div class="form-group">
+                        <label class="form-label">Username <span style="color: var(--danger);">*</span></label>
+                        <input type="text" id="regUsername" class="form-input" placeholder="Choose a username" required>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Email <span style="color: var(--text-muted);">(optional)</span></label>
+                        <input type="email" id="regEmail" class="form-input" placeholder="Enter your email (optional)">
+                        <small class="form-help">Email is optional but helps with account recovery</small>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Password <span style="color: var(--danger);">*</span></label>
+                        <input type="password" id="regPassword" class="form-input" placeholder="Choose a password" required>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Confirm Password <span style="color: var(--danger);">*</span></label>
+                        <input type="password" id="regConfirmPassword" class="form-input" placeholder="Confirm password" required>
+                    </div>
+                    <button class="btn btn-primary" id="registerSubmitBtn" onclick="register()">Register</button>
+                    <div class="auth-switch">
+                        Already have an account? <a onclick="showLoginForm()">Login</a>
+                    </div>
+                </div>
+            `;
+        }
+
+        function isValidEmail(email) {
+            if (!email || email.trim() === '') return true;
+            const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+            return emailRegex.test(email);
+        }
+
+        async function register() {
+            const username = document.getElementById('regUsername').value.trim();
+            const email = document.getElementById('regEmail').value.trim();
+            const password = document.getElementById('regPassword').value;
+            const confirm = document.getElementById('regConfirmPassword').value;
+
+            if (!username) {
+                showToast('Username is required', 'warning');
+                document.getElementById('regUsername').focus();
+                return;
+            }
+
+            if (username.length < 3) {
+                showToast('Username must be at least 3 characters', 'warning');
+                document.getElementById('regUsername').focus();
+                return;
+            }
+
+            if (!password) {
+                showToast('Password is required', 'warning');
+                document.getElementById('regPassword').focus();
+                return;
+            }
+
+            if (password.length < 6) {
+                showToast('Password must be at least 6 characters', 'warning');
+                document.getElementById('regPassword').focus();
+                return;
+            }
+
+            if (password !== confirm) {
+                showToast('Passwords do not match', 'warning');
+                document.getElementById('regConfirmPassword').focus();
+                return;
+            }
+
+            if (email && !isValidEmail(email)) {
+                showToast('Please enter a valid email address or leave it blank', 'warning');
+                document.getElementById('regEmail').focus();
+                return;
+            }
+
+            const requestBody = { username, password };
+            if (email) {
+                requestBody.email = email;
+            }
+
+            const registerBtn = getButtonFromEvent('#registerSubmitBtn');
+            const originalText = registerBtn ? registerBtn.textContent : 'Register';
+            if (registerBtn) {
+                registerBtn.textContent = 'Creating account...';
+                registerBtn.disabled = true;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/auth/register`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(requestBody),
+                    credentials: 'include',
+                    mode: 'cors'
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    currentUser = data.user;
+                    updateUIBasedOnAuth();
+
+                    const message = email
+                        ? 'Registration successful!'
+                        : 'Registration successful! You can add an email later in your profile.';
+                    showToast(message);
+
+                    showHome();
+                } else {
+                    showToast(data.error || 'Registration failed', 'error');
+                }
+            } catch (error) {
+                console.error('Registration error:', error);
+                showToast('Registration failed: ' + error.message, 'error');
+            } finally {
+                if (registerBtn) {
+                    registerBtn.textContent = originalText;
+                    registerBtn.disabled = false;
+                }
+            }
+        }
+
+        async function logout() {
+            try {
+                await fetch(`${API_BASE_URL}/auth/logout`, {
+                    method: 'POST',
+                    credentials: 'include',
+                    mode: 'cors'
+                });
+                currentUser = null;
+                updateUIBasedOnAuth();
+                showToast('Logged out successfully');
+                showHome();
+            } catch (error) {
+                showToast('Logout failed: ' + error.message, 'error');
+            }
+        }
+
+        // ==================== PROFILE FUNCTIONS ====================
+
+
+
+        function showProfile() {
+            if (!currentUser) {
+                showLoginForm();
+                return;
+            }
+
+            const mainContent = document.getElementById('mainContent');
+            mainContent.innerHTML = `
+                <div class="wiki-article">
+                    <h2 class="article-title">My Profile</h2>
+                    
+                    <div class="form-group">
+                        <label class="form-label">Username</label>
+                        <input type="text" class="form-input" value="${currentUser.username}" readonly>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label class="form-label">Email</label>
+                        <input type="email" class="form-input" value="${currentUser.email || 'Not provided'}" readonly>
+                        <small class="form-help">Email is optional</small>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label class="form-label">Member Since</label>
+                        <input type="text" class="form-input" value="${new Date(currentUser.created_at).toLocaleDateString()}" readonly>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label class="form-label">Role</label>
+                        <div id="profileRoleBadges">
+                            ${currentUser.is_admin ? '<span class="role-badge admin">Admin</span>' : ''}
+                            ${currentUser.is_moderator ? '<span class="role-badge moderator">Moderator</span>' : ''}
+                            ${currentUser.is_contributor ? '<span class="role-badge contributor">Contributor</span>' : ''}
+                            ${!currentUser.is_admin && !currentUser.is_moderator && !currentUser.is_contributor ? '<span class="role-badge">Regular User</span>' : ''}
+                        </div>
+                        <small class="form-help">Roles are assigned by moderators through the moderation dashboard.</small>
+                    </div>
+                    
+                    <h3 style="margin-top: 2rem;">Change Password</h3>
+                    <div class="form-group">
+                        <label class="form-label">Current Password</label>
+                        <input type="password" id="currentPassword" class="form-input">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">New Password</label>
+                        <input type="password" id="newPassword" class="form-input">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Confirm New Password</label>
+                        <input type="password" id="confirmNewPassword" class="form-input">
+                    </div>
+                    <button class="btn btn-primary" onclick="changePassword()">Change Password</button>
+                    
+                    ${!currentUser.email ? `
+                        <div style="margin-top: 2rem; padding: 1rem; background: var(--warning-light); border-radius: 8px;">
+                            <h4>Add Email Address</h4>
+                            <p>Adding an email helps with account recovery.</p>
+                            <div class="form-group">
+                                <input type="email" id="newEmail" class="form-input" placeholder="Enter your email">
+                            </div>
+                            <button class="btn btn-primary" onclick="addEmail()">Add Email</button>
+                        </div>
+                    ` : ''}
+                </div>
+            `;
+        }
+
+        async function changePassword() {
+            const current = document.getElementById('currentPassword').value;
+            const newPass = document.getElementById('newPassword').value;
+            const confirm = document.getElementById('confirmNewPassword').value;
+
+            if (!current || !newPass || !confirm) {
+                showToast('All fields required', 'warning');
+                return;
+            }
+
+            if (newPass !== confirm) {
+                showToast('New passwords do not match', 'warning');
+                return;
+            }
+
+            if (newPass.length < 6) {
+                showToast('Password must be at least 6 characters', 'warning');
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/auth/change-password`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        current_password: current,
+                        new_password: newPass
+                    }),
+                    credentials: 'include',
+                    mode: 'cors'
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    showToast('Password changed successfully');
+                    document.getElementById('currentPassword').value = '';
+                    document.getElementById('newPassword').value = '';
+                    document.getElementById('confirmNewPassword').value = '';
+                } else {
+                    showToast(data.error || 'Failed to change password', 'error');
+                }
+            } catch (error) {
+                showToast('Failed: ' + error.message, 'error');
+            }
+        }
+
+        async function addEmail() {
+            const email = document.getElementById('newEmail').value.trim();
+            if (!email) {
+                showToast('Please enter an email', 'warning');
+                return;
+            }
+
+            if (!isValidEmail(email)) {
+                showToast('Please enter a valid email address', 'warning');
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/auth/add-email`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email }),
+                    credentials: 'include',
+                    mode: 'cors'
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    currentUser = data.user;
+                    showToast('Email added successfully!');
+                    showProfile();
+                } else {
+                    const error = await response.json();
+                    showToast(error.error || 'Failed to add email', 'error');
+                }
+            } catch (error) {
+                showToast('Failed: ' + error.message, 'error');
+            }
+        }
+
+
+        function showMyPosts() {
+            if (!currentUser) {
+                showLoginForm();
+                return;
+            }
+            showForum();
+            showToast('Showing your posts');
+        }
+
+        function showMyEdits() {
+            if (!currentUser) {
+                showLoginForm();
+                return;
+            }
+            showQueue();
+            showToast('Showing your wiki edits');
+        }
+
+        // ==================== API CALL FUNCTION ====================
+
+        async function apiCall(endpoint, options = {}) {
+            const url = `${API_BASE_URL}${endpoint}`;
+
+            console.log(`📡 API Call: ${options.method || 'GET'} ${endpoint}`);
+
+            const headers = {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest'
+            };
+
+            const finalOptions = {
+                ...options,
+                headers: {
+                    ...headers,
+                    ...options.headers
+                },
+                credentials: 'include',
+                mode: 'cors'
+            };
+
+            try {
+                const response = await fetch(url, finalOptions);
+                const payload = await response.json().catch(() => ({}));
+
+                if (!response.ok) {
+                    if (response.status === 401) {
+                        await checkAuthStatus();
+                        if (!currentUser) {
+                            UIBasedOnAuth();
+                        }
+                        throw new Error(payload.error || 'Authentication required');
+                    }
+
+                    throw new Error(payload.error || `HTTP error ${response.status}`);
+                }
+
+                return payload;
+
+            } catch (error) {
+                console.error('❌ API call failed:', error);
+                throw error;
+            }
+        }
+
+        // ==================== RATE LIMITING ====================
+
+        function updateRateLimit(remaining) {
+            rateLimit = remaining;
+            document.getElementById('rateLimitCount').textContent = rateLimit;
+
+            const indicator = document.getElementById('rateLimitInfo');
+            indicator.classList.add('visible');
+
+            setTimeout(() => {
+                indicator.classList.remove('visible');
+            }, 3000);
+        }
+
+        function checkRateLimit() {
+            if (rateLimit <= 0) {
+                showToast('Rate limit exceeded. Please wait a moment.', 'warning');
+                return false;
+            }
+            return true;
+        }
+
+        function showToast(message, type = 'success') {
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+            toast.textContent = message;
+            document.body.appendChild(toast);
+
+            setTimeout(() => {
+                toast.remove();
+            }, 3000);
+        }
+
+        // Wiki Functions
+
+        async function loadWikiArticleList() {
+            try {
+                const articles = await apiCall('/wiki/articles');
+
+                const articleList = document.getElementById('articleList');
+                if (articles && articles.length > 0) {
+                    wikiArticles = articles;
+                    articleList.innerHTML = articles.map(article => `
+                        <div class="article-item">
+                            <button class="article-link" onclick="loadWikiArticle('${article.name}')">
+                                <span>${article.name.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}</span>
+                                <small>Open article</small>
+                            </button>
+                        </div>
+                    `).join('');
+
+                    if (!currentArticle && articles.length > 0) {
+                        loadWikiArticle(articles[0].name);
+                    }
+                } else {
+                    articleList.innerHTML = '<p class="empty-state">No wiki articles found</p>';
+                }
+            } catch (error) {
+                console.error('Failed to load article list:', error);
+                document.getElementById('articleList').innerHTML = '<p class="error-message">Failed to load articles</p>';
+            }
+        }
+
+        async function loadWikiArticle(slug) {
+            currentArticle = slug;
+            const mainContent = document.getElementById('mainContent');
+            mainContent.innerHTML = `<div class="loading"><div class="loading-spinner"></div><div>Loading article...</div></div>`;
+
+            try {
+                const article = await apiCall(`/wiki/articles/${slug}`);
+
+                if (!article) {
+                    throw new Error('Article not found');
+                }
+
+                const htmlContent = article.html_content || renderMarkdownSafe(article.content);
+
+                mainContent.innerHTML = `
+                    <article class="wiki-article">
+                        <header class="article-header">
+                            <h1 class="article-title">${article.title}</h1>
+                            <div class="article-meta">
+                                <span>Last edited: ${article.last_modified || 'Recently'}</span>
+                                ${article.url ? `<span>• <a href="${article.url}" target="_blank">View on GitHub</a></span>` : ''}
+                            </div>
+                        </header>
+
+                        <div class="article-content">
+                            ${htmlContent}
+                        </div>
+
+                        <section class="article-callout">
+                            <div>
+                                <strong>Community-reviewed guidance</strong>
+                                <p>Articles are versioned in GitHub and edits go through a review queue before publication.</p>
+                            </div>
+                            <div class="article-callout-actions">
+                                ${currentUser ? `
+                                    <button class="btn btn-primary" onclick="showEditForm('${slug}')">✏️ Suggest Edit</button>
+                                    <button class="btn btn-secondary" onclick="showHistory('${slug}')">📋 View History</button>
+                                ` : `
+                                    <button class="btn btn-primary" onclick="showLoginForm()">Login to Suggest Edit</button>
+                                `}
+                            </div>
+                        </section>
+                    </article>
+                `;
+            } catch (error) {
+                mainContent.innerHTML = `
+                    <div class="error-message">
+                        Failed to load article. Please try again.
+                        <button class="btn btn-primary" onclick="loadWikiArticleList()">Back to Articles</button>
+                    </div>
+                `;
+            }
+        }
+
+        function showNewArticleForm() {
+            if (!currentUser) {
+                showLoginForm();
+                return;
+            }
+
+            if (!currentUser.is_contributor && !currentUser.is_moderator && !currentUser.is_admin) {
+                showToast('You need contributor privileges to create articles', 'warning');
+                return;
+            }
+
+            const mainContent = document.getElementById('mainContent');
+            mainContent.innerHTML = `
+                <div class="markdown-editor">
+                    <button class="back-button" onclick="showWiki()">← Back to Wiki</button>
+                    
+                    <h2 style="margin-bottom: 1rem;">Create New Wiki Article</h2>
+                    
+                    <div class="form-group">
+                        <label class="form-label">Article Title</label>
+                        <input type="text" id="newArticleTitle" class="form-input" placeholder="e.g., Getting Started with Privacy">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label class="form-label">URL Slug</label>
+                        <input type="text" id="newArticleSlug" class="form-input" placeholder="getting-started-with-privacy" readonly>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label class="form-label">Description (optional)</label>
+                        <input type="text" id="newArticleDescription" class="form-input" placeholder="Brief description of the article">
+                    </div>
+                    
+                    <div class="editor-toolbar">
+                        <button class="editor-btn" onclick="insertMarkdown('bold')"><strong>B</strong></button>
+                        <button class="editor-btn" onclick="insertMarkdown('italic')"><em>I</em></button>
+                        <button class="editor-btn" onclick="insertMarkdown('link')">🔗</button>
+                        <button class="editor-btn" onclick="insertMarkdown('code')">{ }</button>
+                        <button class="editor-btn" onclick="insertMarkdown('list')">• List</button>
+                        <button class="editor-btn" onclick="insertMarkdown('heading')">H2</button>
+                        <button class="editor-btn" onclick="insertMarkdown('quote')">"</button>
+                    </div>
+
+                    <textarea class="editor-textarea" id="newArticleContent" placeholder="Write your article content in Markdown..."></textarea>
+
+                    <div style="display: flex; gap: 1rem; margin-top: 1rem;">
+                        <button class="btn btn-primary" onclick="submitNewArticle()">Submit for Review</button>
+                        <button class="btn btn-secondary" onclick="previewNewArticle()">Preview</button>
+                        <button class="btn btn-secondary" onclick="showWiki()">Cancel</button>
+                    </div>
+
+                    <div class="preview-panel" id="previewPanel" style="display: none;">
+                        <h3>Preview</h3>
+                        <div id="previewContent"></div>
+                    </div>
+                </div>
+            `;
+
+            document.getElementById('newArticleTitle').addEventListener('input', function (e) {
+                const slug = e.target.value
+                    .toLowerCase()
+                    .replace(/[^\w\s-]/g, '')
+                    .replace(/\s+/g, '-');
+                document.getElementById('newArticleSlug').value = slug;
+            });
+        }
+
+        async function submitNewArticle() {
+            const title = document.getElementById('newArticleTitle').value.trim();
+            const slug = document.getElementById('newArticleSlug').value.trim();
+            const content = document.getElementById('newArticleContent').value.trim();
+            const submitBtn = getButtonFromEvent('.markdown-editor .btn.btn-primary');
+
+            if (!title || !content) {
+                showToast('Title and content are required', 'warning');
+                return;
+            }
+
+            if (!slug) {
+                showToast('Invalid slug', 'warning');
+                return;
+            }
+
+            const originalText = submitBtn ? submitBtn.textContent : 'Submit for Review';
+            if (submitBtn) {
+                submitBtn.disabled = true;
+                submitBtn.textContent = 'Submitting...';
+            }
+
+            try {
+                await apiCall('/wiki/articles/new', {
+                    method: 'POST',
+                    body: JSON.stringify({ title, slug, content })
+                });
+
+                showToast('New article submitted for review!');
+                await checkAuthStatus();
+                showQueue();
+            } catch (error) {
+                showToast('Failed to submit article: ' + error.message, 'error');
+            } finally {
+                if (submitBtn) {
+                    submitBtn.disabled = false;
+                    submitBtn.textContent = originalText;
+                }
+            }
+        }
+
+        function previewNewArticle() {
+            const preview = document.getElementById('previewPanel');
+            const previewContent = document.getElementById('previewContent');
+            const editor = document.getElementById('newArticleContent');
+
+            if (preview.style.display === 'none') {
+                preview.style.display = 'block';
+                previewContent.innerHTML = renderMarkdownSafe(editor.value);
+            } else {
+                preview.style.display = 'none';
+            }
+        }
+
+        function showEditForm(slug) {
+            if (!currentUser) {
+                showLoginForm();
+                return;
+            }
+
+            const mainContent = document.getElementById('mainContent');
+            mainContent.innerHTML = `
+                <div class="markdown-editor">
+                    <button class="back-button" onclick="loadWikiArticle('${slug}')">← Back to Article</button>
+                    
+                    <h2 style="margin-bottom: 1rem;">Edit Article: ${slug.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}</h2>
+                    
+                    <div class="editor-toolbar">
+                        <button class="editor-btn" onclick="insertMarkdown('bold')"><strong>B</strong></button>
+                        <button class="editor-btn" onclick="insertMarkdown('italic')"><em>I</em></button>
+                        <button class="editor-btn" onclick="insertMarkdown('link')">🔗</button>
+                        <button class="editor-btn" onclick="insertMarkdown('code')">{ }</button>
+                        <button class="editor-btn" onclick="insertMarkdown('list')">• List</button>
+                        <button class="editor-btn" onclick="insertMarkdown('heading')">H2</button>
+                        <button class="editor-btn" onclick="insertMarkdown('quote')">"</button>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">Edit Comment (optional)</label>
+                        <input type="text" id="editComment" class="form-input" placeholder="Brief description of your changes">
+                    </div>
+
+                    <textarea class="editor-textarea" id="markdownEditor">Loading current content...</textarea>
+
+                    <div style="display: flex; gap: 1rem; margin-top: 1rem;">
+                        <button class="btn btn-primary" onclick="submitWikiEdit('${slug}')">Submit for Review</button>
+                        <button class="btn btn-secondary" onclick="previewEdit()">Preview</button>
+                        <button class="btn btn-secondary" onclick="loadWikiArticle('${slug}')">Cancel</button>
+                    </div>
+
+                    <div class="preview-panel" id="previewPanel" style="display: none;">
+                        <h3>Preview</h3>
+                        <div id="previewContent"></div>
+                    </div>
+                </div>
+            `;
+
+            apiCall(`/wiki/articles/${slug}`).then(article => {
+                document.getElementById('markdownEditor').value = article.content;
+            }).catch(() => {
+                document.getElementById('markdownEditor').value = '# Error loading content';
+            });
+        }
+
+        function insertMarkdown(type) {
+            const textarea = document.getElementById('markdownEditor') || document.getElementById('newArticleContent');
+            if (!textarea) return;
+
+            const start = textarea.selectionStart;
+            const end = textarea.selectionEnd;
+            const text = textarea.value.substring(start, end);
+
+            let insert = '';
+            switch (type) {
+                case 'bold': insert = `**${text}**`; break;
+                case 'italic': insert = `*${text}*`; break;
+                case 'link': insert = `[${text}](url)`; break;
+                case 'code': insert = `\`${text}\``; break;
+                case 'list': insert = `- ${text}`; break;
+                case 'heading': insert = `## ${text}`; break;
+                case 'quote': insert = `> ${text}`; break;
+            }
+
+            textarea.value = textarea.value.substring(0, start) + insert + textarea.value.substring(end);
+        }
+
+        function previewEdit() {
+            const preview = document.getElementById('previewPanel');
+            const previewContent = document.getElementById('previewContent');
+            const editor = document.getElementById('markdownEditor');
+
+            if (preview.style.display === 'none') {
+                preview.style.display = 'block';
+                previewContent.innerHTML = renderMarkdownSafe(editor.value);
+            } else {
+                preview.style.display = 'none';
+            }
+        }
+
+        async function submitWikiEdit(slug) {
+            if (!checkRateLimit()) return;
+
+            const content = document.getElementById('markdownEditor').value.trim();
+            const comment = document.getElementById('editComment').value.trim();
+            const submitBtn = getButtonFromEvent('.markdown-editor .btn.btn-primary');
+
+            if (!content) {
+                showToast('Article content cannot be empty', 'warning');
+                return;
+            }
+
+            const originalText = submitBtn ? submitBtn.textContent : 'Submit for Review';
+            if (submitBtn) {
+                submitBtn.disabled = true;
+                submitBtn.textContent = 'Submitting...';
+            }
+
+            try {
+                await apiCall(`/wiki/articles/${slug}/edit`, {
+                    method: 'POST',
+                    body: JSON.stringify({ content, comment })
+                });
+
+                await checkAuthStatus();
+                showToast('Edit submitted for review!');
+                showQueue();
+            } catch (error) {
+                showToast('Failed to submit edit: ' + error.message, 'error');
+            } finally {
+                if (submitBtn) {
+                    submitBtn.disabled = false;
+                    submitBtn.textContent = originalText;
+                }
+            }
+        }
+
+        function showHistory(slug) {
+            const mainContent = document.getElementById('mainContent');
+            mainContent.innerHTML = `
+                <div class="wiki-article">
+                    <button class="back-button" onclick="loadWikiArticle('${slug}')">← Back to Article</button>
+                    
+                    <h2>Edit History: ${slug.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}</h2>
+                    
+                    <div class="edit-queue" id="historyList">
+                        <div class="loading">
+                            <div class="loading-spinner"></div>
+                            <div>Loading history...</div>
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            setTimeout(() => {
+                document.getElementById('historyList').innerHTML = '<p class="empty-state">History view coming soon</p>';
+            }, 500);
+        }
+
+        // Forum functions
+
+        async function loadForumPosts(category = null) {
+            const mainContent = document.getElementById('mainContent');
+            mainContent.innerHTML = `<div class="loading"><div class="loading-spinner"></div><div>Loading forum posts...</div></div>`;
+
+            try {
+                let url = '/forum/posts';
+                if (category) url += `?category=${category}`;
+
+                const posts = await apiCall(url);
+
+                let postsHtml = '';
+                if (posts && posts.length > 0) {
+                    postsHtml = posts.map(post => `
+                        <div class="post-card" onclick="viewThread('${post.id}')">
+                            <div class="post-header">
+                                <span class="post-author">${post.author}</span>
+                                ${post.author_is_mod ? '<span class="role-badge moderator">Mod</span>' : ''}
+                                <span class="post-date">${new Date(post.created_at).toLocaleString()}</span>
+                                ${post.tags ? post.tags.map(t => `<span class="tag">${t.name}</span>`).join('') : ''}
+                            </div>
+                            <h3 class="post-title">${post.title}</h3>
+                            <p class="post-excerpt">${post.content.substring(0, 150)}...</p>
+                            <div class="post-footer">
+                                <div class="post-stats">
+                                    <span class="post-stat">👍 ${post.vote_score || 0}</span>
+                                    <span class="post-stat">💬 ${post.comment_count || 0}</span>
+                                    <span class="post-stat">👁️ ${post.view_count || 0}</span>
+                                </div>
+                            </div>
+                        </div>
+                    `).join('');
+                } else {
+                    postsHtml = '<p class="empty-state">No posts yet. Be the first to create one!</p>';
+                }
+
+                mainContent.innerHTML = `
+                    <div>
+                        <div class="forum-filters">
+                            <div class="filter-tabs">
+                                <button class="filter-tab active" onclick="filterForum('all')">All</button>
+                                <button class="filter-tab" onclick="filterForum('unanswered')">Unanswered</button>
+                                <button class="filter-tab" onclick="filterForum('popular')">Popular</button>
+                                <button class="filter-tab" onclick="filterForum('recent')">Recent</button>
+                            </div>
+                            <select class="sort-select" onchange="sortPosts(this.value)">
+                                <option value="latest">Latest</option>
+                                <option value="votes">Most Votes</option>
+                                <option value="comments">Most Discussed</option>
+                            </select>
+                            ${currentUser ? `
+                                <button class="btn btn-primary" onclick="showNewPostForm()">+ New Post</button>
+                            ` : `
+                                <button class="btn btn-primary" onclick="showLoginForm()">Login to Post</button>
+                            `}
+                        </div>
+                        
+                        <div id="forumPosts">
+                            ${postsHtml}
+                        </div>
+                    </div>
+                `;
+            } catch (error) {
+                console.error('Failed to load forum posts:', error);
+                mainContent.innerHTML = `
+                    <div class="error-message">
+                        Failed to load forum posts. Please try again.
+                        <button class="btn btn-primary" onclick="loadForumPosts()">Retry</button>
+                    </div>
+                `;
+            }
+        }
+
+        function showNewPostForm() {
+            if (!currentUser) {
+                showLoginForm();
+                return;
+            }
+
+            const mainContent = document.getElementById('mainContent');
+            mainContent.innerHTML = `
+                <div class="new-post-form">
+                    <button class="back-button" onclick="loadForumPosts()">← Back to Forum</button>
+                    
+                    <h2 style="margin-bottom: 1.5rem;">Create New Post</h2>
+                    
+                    <div class="form-group">
+                        <label class="form-label">Title</label>
+                        <input type="text" id="postTitle" class="form-input" placeholder="Enter post title">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label class="form-label">Category</label>
+                        <select id="postCategory" class="form-select">
+                            <option value="1">General Discussion</option>
+                            <option value="2">Beginners Corner</option>
+                            <option value="3">Tools & Software</option>
+                            <option value="4">News & Updates</option>
+                        </select>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label class="form-label">Tags (comma separated)</label>
+                        <input type="text" id="postTags" class="form-input" placeholder="e.g., question, 2fa, guide">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label class="form-label">Content</label>
+                        <textarea id="postContent" class="form-textarea" placeholder="Write your post content here..."></textarea>
+                    </div>
+                    
+                    <div style="display: flex; gap: 1rem;">
+                        <button class="btn btn-primary" onclick="submitNewPost()">Post</button>
+                        <button class="btn btn-secondary" onclick="loadForumPosts()">Cancel</button>
+                    </div>
+                </div>
+            `;
+        }
+
+        async function submitNewPost() {
+            if (!checkRateLimit()) return;
+
+            if (!currentUser) {
+                showToast('Please login to create a post', 'warning');
+                showLoginForm();
+                return;
+            }
+
+            const title = document.getElementById('postTitle').value;
+            const content = document.getElementById('postContent').value;
+            const category = document.getElementById('postCategory').value;
+            const tags = document.getElementById('postTags').value.split(',').map(t => t.trim()).filter(t => t);
+
+            if (!title || !content) {
+                showToast('Title and content are required', 'warning');
+                return;
+            }
+
+            try {
+                await apiCall('/forum/posts', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        title: title,
+                        content: content,
+                        category_id: parseInt(category),
+                        tags: tags
+                    })
+                });
+
+                showToast('Post created successfully!');
+                loadForumPosts();
+            } catch (error) {
+                showToast('Failed to create post: ' + error.message, 'error');
+            }
+        }
+
+        async function viewThread(postId) {
+            currentPostId = postId;
+            const mainContent = document.getElementById('mainContent');
+            mainContent.innerHTML = `<div class="loading"><div class="loading-spinner"></div><div>Loading thread...</div></div>`;
+
+            try {
+                const post = await apiCall(`/forum/posts/${postId}`);
+
+                if (!post) throw new Error('Post not found');
+
+                // Function to render comments recursively
+                function renderComments(comments) {
+                    if (!comments || comments.length === 0) return '';
+
+                    return comments.map(comment => {
+                        // Ensure comment has required properties
+                        const commentId = comment.id || '';
+                        const commentAuthor = comment.author || 'Anonymous';
+                        const commentContent = comment.content || '';
+                        const commentScore = comment.vote_score || 0;
+                        const commentDate = comment.created_at ? new Date(comment.created_at).toLocaleString() : 'Unknown date';
+
+                        return `
+                    <div class="comment" id="comment-${commentId}">
+                        <div class="comment-header">
+                            <span class="post-author">${commentAuthor}</span>
+                            ${comment.author_is_mod ? '<span class="role-badge moderator">Mod</span>' : ''}
+                            <span class="post-date">${commentDate}</span>
+                        </div>
+                        <div class="article-content">${renderMarkdownSafe(commentContent)}</div>
+                        
+                        <!-- Comment vote controls -->
+                        <div class="rating-controls">
+                            <button class="rating-button" onclick="vote(event, 'comment', '${commentId}', 1)">👍</button>
+                            <span class="rating-score">${commentScore}</span>
+                            <button class="rating-button" onclick="vote(event, 'comment', '${commentId}', -1)">👎</button>
+                            ${currentUser ? `
+                                <button class="btn btn-secondary" style="padding: 0.25rem 0.5rem; margin-left: 0.5rem;" onclick="showReplyForm('${post.id}', '${commentId}')">Reply</button>
+                            ` : ''}
+                            ${(currentUser && (currentUser.id === comment.author_id || currentUser.is_moderator || currentUser.is_admin)) ? `
+                                <button class="btn btn-secondary" style="padding: 0.25rem 0.5rem;" onclick="deleteComment('${commentId}')">Delete</button>
+                            ` : ''}
+                        </div>
+                        
+                        ${comment.replies && comment.replies.length > 0 ?
+                                `<div class="comment-thread">${renderComments(comment.replies)}</div>` : ''}
+                    </div>
+                `;
+                    }).join('');
+                }
+
+                // Ensure post has required properties
+                const postTitle = post.title || 'Untitled';
+                const postAuthor = post.author || 'Anonymous';
+                const postContent = post.content || '';
+                const postScore = post.vote_score || 0;
+                const postDate = post.created_at ? new Date(post.created_at).toLocaleString() : 'Unknown date';
+
+                mainContent.innerHTML = `
+            <div class="thread-container">
+                <button class="back-button" onclick="loadForumPosts()">← Back to Forum</button>
+                
+                <div class="thread-post">
+                    <h2 class="article-title">${postTitle}</h2>
+                    <div class="post-header">
+                        <span class="post-author">${postAuthor}</span>
+                        ${post.author_is_mod ? '<span class="role-badge moderator">Mod</span>' : ''}
+                        <span class="post-date">${postDate}</span>
+                    </div>
+                    <div class="article-content">${renderMarkdownSafe(postContent)}</div>
+                    
+                    <!-- Post vote controls -->
+                    <div class="rating-controls">
+                        <button class="rating-button" onclick="vote(event, 'post', '${post.id}', 1)">👍</button>
+                        <span class="rating-score">${postScore}</span>
+                        <button class="rating-button" onclick="vote(event, 'post', '${post.id}', -1)">👎</button>
+                        ${currentUser ? `
+                            <button class="btn btn-primary" style="margin-left: auto;" onclick="showReplyForm('${post.id}', null)">Reply</button>
+                        ` : ''}
+                        ${(currentUser && (currentUser.id === post.author_id || currentUser.is_moderator || currentUser.is_admin)) ? `
+                            <button class="btn btn-secondary" onclick="deletePost('${post.id}')">Delete</button>
+                        ` : ''}
+                    </div>
+                    
+                    ${(currentUser?.is_moderator || currentUser?.is_admin) ? `
+                        <div class="moderation-actions" style="margin-top: 1rem;">
+                            <button class="mod-action hide" onclick="moderatePost('${post.id}', 'hide')">Hide</button>
+                            <button class="mod-action lock" onclick="moderatePost('${post.id}', 'lock')">Lock</button>
+                        </div>
+                    ` : ''}
+                </div>
+                
+                <h3 style="margin: 2rem 0 1rem;">Comments</h3>
+                <div id="commentsSection">
+                    ${post.comments && post.comments.length > 0 ?
+                        renderComments(post.comments) :
+                        '<p class="empty-state">No comments yet. Be the first to reply!</p>'}
+                </div>
+                
+                <div id="replyFormContainer" style="display: none; margin-top: 2rem;">
+                    <div class="reply-form">
+                        <h4>Reply to ${currentReplyParentId ? 'comment' : 'post'}</h4>
+                        <textarea id="replyContent" class="reply-textarea" placeholder="Write your reply..."></textarea>
+                        <div style="display: flex; gap: 1rem; margin-top: 1rem;">
+                            <button class="btn btn-primary" onclick="submitReply('${post.id}')">Post Reply</button>
+                            <button class="btn btn-secondary" onclick="hideReplyForm()">Cancel</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+
+            } catch (error) {
+                console.error('Error loading thread:', error);
+                mainContent.innerHTML = `
+            <div class="error-message">
+                Failed to load thread. Please try again.
+                <button class="btn btn-primary" onclick="loadForumPosts()">Back to Forum</button>
+            </div>
+        `;
+            }
+        }
+
+        function showReplyForm(postId, parentCommentId = null) {
+            currentReplyParentId = parentCommentId;
+            document.getElementById('replyFormContainer').style.display = 'block';
+        }
+
+        function hideReplyForm() {
+            document.getElementById('replyFormContainer').style.display = 'none';
+            currentReplyParentId = null;
+        }
+
+        async function submitReply(postId) {
+            if (!checkRateLimit()) return;
+
+            const content = document.getElementById('replyContent').value;
+
+            if (!content || !content.trim()) {
+                showToast('Reply content is required', 'warning');
+                return;
+            }
+
+            try {
+                await apiCall(`/forum/posts/${postId}/comments`, {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        content: content.trim(),
+                        parent_comment_id: currentReplyParentId
+                    })
+                });
+
+                showToast('Reply posted successfully!');
+                hideReplyForm();
+                viewThread(postId);
+            } catch (error) {
+                showToast('Failed to post reply: ' + error.message, 'error');
+            }
+        }
+
+
+        async function deletePost(postId) {
+            if (!currentUser) {
+                showToast('Please login first', 'warning');
+                return;
+            }
+
+            if (!confirm('Delete this post? This cannot be undone.')) return;
+
+            try {
+                await apiCall(`/forum/posts/${postId}`, { method: 'DELETE' });
+                showToast('Post deleted successfully');
+                loadForumPosts();
+            } catch (error) {
+                showToast('Failed to delete post: ' + error.message, 'error');
+            }
+        }
+
+        async function deleteComment(commentId) {
+            if (!currentUser) {
+                showToast('Please login first', 'warning');
+                return;
+            }
+
+            if (!confirm('Delete this comment? This cannot be undone.')) return;
+
+            try {
+                await apiCall(`/forum/comments/${commentId}`, { method: 'DELETE' });
+                showToast('Comment deleted successfully');
+                if (currentPostId) {
+                    viewThread(currentPostId);
+                }
+            } catch (error) {
+                showToast('Failed to delete comment: ' + error.message, 'error');
+            }
+        }
+
+        async function vote(event, type, id, value) {
+            if (!checkRateLimit()) return;
+            if (!currentUser) {
+                showToast('Please login to vote', 'warning');
+                showLoginForm();
+                return;
+            }
+
+            const button = event.target;
+            const container = button.closest('.rating-controls');
+
+            if (!container) {
+                console.error('Rating container not found');
+                return;
+            }
+
+            const scoreSpan = container.querySelector('.rating-score');
+            const ratingButtons = container.querySelectorAll('.rating-button');
+            const upButton = ratingButtons[0];
+            const downButton = ratingButtons[ratingButtons.length - 1];
+
+            // Check if elements exist
+            if (!scoreSpan || !upButton || !downButton) {
+                console.error('Vote elements not found');
+                return;
+            }
+
+            const currentScore = parseInt(scoreSpan.textContent) || 0;
+            const isUpvoted = upButton.classList.contains('upvoted');
+            const isDownvoted = downButton.classList.contains('downvoted');
+
+            // Determine the value to send to server
+            let sendValue = value;
+
+            // If clicking the same button that's already active, remove the vote
+            if ((value === 1 && isUpvoted) || (value === -1 && isDownvoted)) {
+                sendValue = 0;
+            }
+
+            // Optimistic UI update
+            let newScore = currentScore;
+
+            if (sendValue === 0) {
+                // Removing vote
+                if (value === 1 && isUpvoted) {
+                    newScore = currentScore - 1;
+                    upButton.classList.remove('upvoted');
+                } else if (value === -1 && isDownvoted) {
+                    newScore = currentScore + 1;
+                    downButton.classList.remove('downvoted');
+                }
+            } else if (sendValue === 1) {
+                // Upvoting
+                if (isDownvoted) {
+                    newScore = currentScore + 2;
+                    downButton.classList.remove('downvoted');
+                } else if (!isUpvoted) {
+                    newScore = currentScore + 1;
+                }
+                upButton.classList.add('upvoted');
+                downButton.classList.remove('downvoted');
+            } else if (sendValue === -1) {
+                // Downvoting
+                if (isUpvoted) {
+                    newScore = currentScore - 2;
+                    upButton.classList.remove('upvoted');
+                } else if (!isDownvoted) {
+                    newScore = currentScore - 1;
+                }
+                downButton.classList.add('downvoted');
+                upButton.classList.remove('upvoted');
+            }
+
+            // Update score optimistically
+            scoreSpan.textContent = newScore;
+
+            try {
+                const result = await apiCall('/forum/vote', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        [type === 'post' ? 'post_id' : 'comment_id']: id,
+                        value: sendValue
+                    })
+                });
+
+                // Update with actual score from server
+                if (result && result.score !== undefined) {
+                    scoreSpan.textContent = result.score;
+                }
+
+                // Update button states based on server response
+                if (result && result.user_vote !== undefined) {
+                    // Reset all vote classes
+                    upButton.classList.remove('upvoted');
+                    downButton.classList.remove('downvoted');
+
+                    // Set based on server response
+                    if (result.user_vote === 1) {
+                        upButton.classList.add('upvoted');
+                    } else if (result.user_vote === -1) {
+                        downButton.classList.add('downvoted');
+                    }
+                }
+
+                // Show feedback
+                if (sendValue === 0) {
+                    showToast('Vote removed');
+                } else if (sendValue === 1) {
+                    showToast('Upvoted!');
+                } else if (sendValue === -1) {
+                    showToast('Downvoted!');
+                }
+
+            } catch (error) {
+                console.error('Vote failed:', error);
+
+                // Revert optimistic update on error
+                scoreSpan.textContent = currentScore;
+
+                // Revert button classes
+                if (isUpvoted) {
+                    upButton.classList.add('upvoted');
+                } else {
+                    upButton.classList.remove('upvoted');
+                }
+
+                if (isDownvoted) {
+                    downButton.classList.add('downvoted');
+                } else {
+                    downButton.classList.remove('downvoted');
+                }
+
+                showToast('Failed to vote: ' + error.message, 'error');
+            }
+        }
+
+        // Edit queue
+
+        async function loadEditQueue() {
+            if (!currentUser) {
+                showLoginForm();
+                return;
+            }
+
+            const mainContent = document.getElementById('mainContent');
+            mainContent.innerHTML = `<div class="loading"><div class="loading-spinner"></div><div>Loading edit queue...</div></div>`;
+
+            try {
+                const edits = await apiCall('/wiki/edits/pending');
+
+                if (edits && edits.length > 0) {
+                    mainContent.innerHTML = `
+                        <h2 style="margin-bottom: 1.5rem;">Pending Wiki Edits</h2>
+                        <div class="edit-queue">
+                            ${edits.map(edit => `
+                                <div class="edit-item" id="edit-${edit.id}">
+                                    <div class="edit-header">
+                                        <div>
+                                            <h3>${edit.article_title} ${edit.is_new_article ? '<span class="tag">New</span>' : ''}</h3>
+                                            <div class="edit-meta">
+                                                <span>Submitted by: ${edit.author}</span>
+                                                <span>•</span>
+                                                <span>${new Date(edit.created_at).toLocaleString()}</span>
+                                            </div>
+                                        </div>
+                                        <div class="edit-votes">
+                                            <span class="vote-count">${edit.votes_for}/${edit.votes_for + edit.votes_against} votes</span>
+                                            ${(currentUser?.is_contributor || currentUser?.is_moderator || currentUser?.is_admin) && !edit.user_voted ? `
+                                                <button class="vote-btn" onclick="voteOnEdit('${edit.id}', true)">✓ Approve</button>
+                                                <button class="vote-btn" onclick="voteOnEdit('${edit.id}', false)">✗ Reject</button>
+                                            ` : edit.user_voted ? '<span class="tag">Voted</span>' : ''}
+                                        </div>
+                                    </div>
+                                    <div style="margin-top: 1rem;">
+                                        <strong>Comment:</strong> "${edit.edit_comment || 'No comment provided'}"
+                                    </div>
+                                    ${edit.pr_url ? `
+                                        <div style="margin-top: 0.5rem;">
+                                            <a href="${edit.pr_url}" target="_blank" class="tag">View on GitHub →</a>
+                                        </div>
+                                    ` : ''}
+                                </div>
+                            `).join('')}
+                        </div>
+                    `;
+                } else {
+                    mainContent.innerHTML = `
+                        <h2 style="margin-bottom: 1.5rem;">Pending Wiki Edits</h2>
+                        <div class="empty-state">
+                            <h3>No pending edits</h3>
+                            <p>All wiki edits have been reviewed.</p>
+                        </div>
+                    `;
+                }
+            } catch (error) {
+                mainContent.innerHTML = `
+                    <div class="error-message">
+                        Failed to load edit queue. Please try again.
+                        <button class="btn btn-primary" onclick="loadEditQueue()">Retry</button>
+                    </div>
+                `;
+            }
+        }
+
+        async function voteOnEdit(editId, approve) {
+            if (!checkRateLimit()) return;
+
+            try {
+                const result = await apiCall(`/wiki/edits/${editId}/vote`, {
+                    method: 'POST',
+                    body: JSON.stringify({ approve })
+                });
+
+                const editItem = document.getElementById(`edit-${editId}`);
+                if (editItem) {
+                    const voteCountSpan = editItem.querySelector('.vote-count');
+                    voteCountSpan.textContent = `${result.votes_for}/${result.votes_for + result.votes_against} votes`;
+
+                    const buttons = editItem.querySelectorAll('.vote-btn');
+                    buttons.forEach(btn => btn.remove());
+                    editItem.querySelector('.edit-votes').innerHTML += '<span class="tag">Voted</span>';
+                }
+
+                showToast(`Edit ${approve ? 'approved' : 'rejected'}!`);
+            } catch (error) {
+                showToast('Failed to vote: ' + error.message, 'error');
+            }
+        }
+
+        // Mod functions
+
+        async function loadModerationQueue() {
+            if (!currentUser || (!currentUser.is_moderator && !currentUser.is_admin)) {
+                showToast('Moderator access required', 'error');
+                showHome();
+                return;
+            }
+
+            const mainContent = document.getElementById('mainContent');
+            mainContent.innerHTML = `<div class="loading"><div class="loading-spinner"></div><div>Loading moderation tools...</div></div>`;
+
+            try {
+                const users = await apiCall('/moderation/users');
+
+                mainContent.innerHTML = `
+                    <div class="moderation-dashboard">
+                        <div class="moderation-header-row">
+                            <div>
+                                <h2 style="margin-bottom: 0.5rem;">Moderation Dashboard</h2>
+                                <p style="color: var(--text-secondary);">Review registered users and inspect their posts and comments.</p>
+                            </div>
+                            <div class="tag">${users.length} users</div>
+                        </div>
+                        <div class="moderation-user-list">
+                            ${users.length ? users.map(user => `
+                                <div class="moderation-user-card">
+                                    <div class="moderation-user-main">
+                                        <div>
+                                            <h3>${escapeHtml(user.username)}</h3>
+                                            <div class="moderation-user-meta">
+                                                <span>${user.email ? escapeHtml(user.email) : 'No email'}</span>
+                                                <span>Posts: ${user.post_count}</span>
+                                                <span>Comments: ${user.comment_count}</span>
+                                            </div>
+                                            <div class="article-tags" style="margin-top: 0.75rem;">
+                                                ${user.is_admin ? '<span class="role-badge admin">Admin</span>' : ''}
+                                                ${user.is_moderator ? '<span class="role-badge moderator">Moderator</span>' : ''}
+                                                ${user.is_contributor ? '<span class="role-badge contributor">Contributor</span>' : ''}
+                                                ${user.hidden_post_count ? `<span class="tag">Hidden posts: ${user.hidden_post_count}</span>` : ''}
+                                                ${user.hidden_comment_count ? `<span class="tag">Hidden comments: ${user.hidden_comment_count}</span>` : ''}
+                                            </div>
+                                        </div>
+                                        <button class="btn btn-primary" onclick="viewModerationUser('${user.id}')">View activity</button>
+                                    </div>
+                                </div>
+                            `).join('') : '<div class="empty-state"><h3>No users found</h3></div>'}
+                        </div>
+                    </div>
+                `;
+            } catch (error) {
+                mainContent.innerHTML = `
+                    <div class="error-message">
+                        Failed to load moderation dashboard: ${escapeHtml(error.message)}
+                    </div>
+                `;
+            }
+        }
+
+        async function viewModerationUser(userId) {
+            currentModerationUserId = userId;
+            const mainContent = document.getElementById('mainContent');
+            mainContent.innerHTML = `<div class="loading"><div class="loading-spinner"></div><div>Loading user activity...</div></div>`;
+
+            try {
+                const data = await apiCall(`/moderation/users/${userId}`);
+                const user = data.user;
+                const posts = data.posts || [];
+                const comments = data.comments || [];
+                const actions = data.moderation_actions || [];
+
+                mainContent.innerHTML = `
+                    <div class="moderation-dashboard">
+                        <button class="back-button" onclick="loadModerationQueue()">← Back to moderation dashboard</button>
+                        <div class="wiki-article" style="margin-bottom: 1.5rem;">
+                            <h2 class="article-title">${escapeHtml(user.username)}</h2>
+                            <div class="article-meta">
+                                <span>${user.email ? escapeHtml(user.email) : 'No email provided'}</span>
+                                <span>Joined: ${user.created_at ? new Date(user.created_at).toLocaleString() : 'Unknown'}</span>
+                                <span>Last seen: ${user.last_seen_at ? new Date(user.last_seen_at).toLocaleString() : 'Unknown'}</span>
+                            </div>
+                            <div class="article-tags">
+                                ${user.is_admin ? '<span class="role-badge admin">Admin</span>' : ''}
+                                ${user.is_moderator ? '<span class="role-badge moderator">Moderator</span>' : ''}
+                                ${user.is_contributor ? '<span class="role-badge contributor">Contributor</span>' : ''}
+                            </div>
+                        </div>
+
+                        <section class="moderation-section-block">
+                            <h3>Posts (${posts.length})</h3>
+                            ${posts.length ? posts.map(post => `
+                                <div class="moderation-record">
+                                    <div class="moderation-record-header">
+                                        <div>
+                                            <strong>${escapeHtml(post.title)}</strong>
+                                            <div class="moderation-user-meta">
+                                                <span>${post.category_name ? escapeHtml(post.category_name) : 'No category'}</span>
+                                                <span>${post.created_at ? new Date(post.created_at).toLocaleString() : 'Unknown date'}</span>
+                                                <span>Score: ${post.vote_score}</span>
+                                                <span>Comments: ${post.comment_count}</span>
+                                            </div>
+                                        </div>
+                                        <div class="moderation-actions">
+                                            <button class="mod-action ${post.is_hidden ? 'hide' : 'remove'}" onclick="moderatePost('${post.id}', '${post.is_hidden ? 'unhide' : 'hide'}')">${post.is_hidden ? 'Unhide' : 'Hide'}</button>
+                                            <button class="mod-action lock" onclick="moderatePost('${post.id}', '${post.is_locked ? 'unlock' : 'lock'}')">${post.is_locked ? 'Unlock' : 'Lock'}</button>
+                                            <button class="btn btn-secondary" onclick="viewThread('${post.id}')">Open thread</button>
+                                        </div>
+                                    </div>
+                                    <p>${escapeHtml((post.content || '').slice(0, 280))}${(post.content || '').length > 280 ? '…' : ''}</p>
+                                </div>
+                            `).join('') : '<div class="empty-state"><h3>No posts by this user</h3></div>'}
+                        </section>
+
+                        <section class="moderation-section-block">
+                            <h3>Comments (${comments.length})</h3>
+                            ${comments.length ? comments.map(comment => `
+                                <div class="moderation-record">
+                                    <div class="moderation-record-header">
+                                        <div>
+                                            <strong>${comment.post_title ? escapeHtml(comment.post_title) : 'Comment'}</strong>
+                                            <div class="moderation-user-meta">
+                                                <span>${comment.created_at ? new Date(comment.created_at).toLocaleString() : 'Unknown date'}</span>
+                                                <span>Score: ${comment.vote_score}</span>
+                                                ${comment.is_hidden ? '<span class="tag">Hidden</span>' : ''}
+                                                ${comment.is_deleted ? '<span class="tag">Deleted</span>' : ''}
+                                            </div>
+                                        </div>
+                                        <div class="moderation-actions">
+                                            <button class="mod-action ${comment.is_hidden ? 'hide' : 'remove'}" onclick="moderateComment('${comment.id}', '${comment.is_hidden ? 'unhide' : 'hide'}')">${comment.is_hidden ? 'Unhide' : 'Hide'}</button>
+                                            ${comment.post_id ? `<button class="btn btn-secondary" onclick="viewThread('${comment.post_id}')">Open thread</button>` : ''}
+                                        </div>
+                                    </div>
+                                    <p>${escapeHtml(comment.content || '')}</p>
+                                </div>
+                            `).join('') : '<div class="empty-state"><h3>No comments by this user</h3></div>'}
+                        </section>
+
+                        <section class="moderation-section-block">
+                            <h3>Moderation actions performed (${actions.length})</h3>
+                            ${actions.length ? actions.map(action => `
+                                <div class="moderation-record compact">
+                                    <strong>${escapeHtml(action.action_type)}</strong>
+                                    <div class="moderation-user-meta">
+                                        <span>Target: ${escapeHtml(action.target_type)}</span>
+                                        <span>${action.created_at ? new Date(action.created_at).toLocaleString() : 'Unknown date'}</span>
+                                        ${action.reason ? `<span>Reason: ${escapeHtml(action.reason)}</span>` : ''}
+                                    </div>
+                                </div>
+                            `).join('') : '<div class="empty-state"><h3>No moderation actions recorded</h3></div>'}
+                        </section>
+                    </div>
+                `;
+            } catch (error) {
+                mainContent.innerHTML = `
+                    <div class="error-message">
+                        Failed to load user activity: ${escapeHtml(error.message)}
+                    </div>
+                `;
+            }
+        }
+
+        async function moderatePost(postId, action) {
+            if (!checkRateLimit()) return;
+
+            try {
+                await apiCall('/moderation/actions', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        action: action,
+                        target_type: 'post',
+                        target_id: postId
+                    })
+                });
+
+                showToast(`Post ${action}ed`);
+                if (currentModerationUserId) {
+                    viewModerationUser(currentModerationUserId);
+                } else if (currentView === 'moderation') {
+                    loadModerationQueue();
+                } else {
+                    loadForumPosts();
+                }
+            } catch (error) {
+                showToast('Failed: ' + error.message, 'error');
+            }
+        }
+
+        async function moderateComment(commentId, action) {
+            if (!checkRateLimit()) return;
+
+            try {
+                await apiCall('/moderation/actions', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        action: action,
+                        target_type: 'comment',
+                        target_id: commentId
+                    })
+                });
+
+                showToast(`Comment ${action}ed`);
+                if (currentModerationUserId) {
+                    viewModerationUser(currentModerationUserId);
+                } else if (currentPostId) {
+                    viewThread(currentPostId);
+                } else {
+                    loadModerationQueue();
+                }
+            } catch (error) {
+                showToast('Failed: ' + error.message, 'error');
+            }
+        }
+
+        // Nav functions
+
+        function showWiki() {
+            currentView = 'wiki';
+            lastStableView = 'wiki';
+            document.getElementById('wikiSidebar').style.display = 'block';
+            updateActiveNav('wiki');
+            if (wikiArticles.length > 0 && currentArticle) {
+                loadWikiArticle(currentArticle);
+            } else if (wikiArticles.length > 0) {
+                loadWikiArticle(wikiArticles[0].name);
+            } else {
+                loadWikiArticleList();
+            }
+        }
+
+        function showForum() {
+            currentView = 'forum';
+            lastStableView = 'forum';
+            document.getElementById('wikiSidebar').style.display = 'block';
+            updateActiveNav('forum');
+            loadForumPosts();
+        }
+
+        function showQueue() {
+            currentView = 'queue';
+            document.getElementById('wikiSidebar').style.display = 'none';
+            updateActiveNav('queue');
+            loadEditQueue();
+        }
+
+        function showModeration() {
+            currentView = 'moderation';
+            document.getElementById('wikiSidebar').style.display = 'none';
+            updateActiveNav('moderation');
+            loadModerationQueue();
+        }
+
+        function showHome() {
+            showWiki();
+        }
+
+        function updateActiveNav(active) {
+            document.querySelectorAll('.nav-item').forEach(item => {
+                item.classList.remove('active');
+            });
+            const navItems = document.querySelectorAll('.nav-item');
+            if (active === 'wiki') navItems[0].classList.add('active');
+            else if (active === 'forum') navItems[1].classList.add('active');
+            else if (active === 'queue') navItems[2].classList.add('active');
+            else if (active === 'moderation') navItems[3].classList.add('active');
+        }
+
+        function filterForum(filter) {
+            document.querySelectorAll('.filter-tab').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            event.target.classList.add('active');
+            loadForumPosts();
+        }
+
+        function sortPosts(method) {
+            loadForumPosts();
+        }
+
+        async function performSearch() {
+            const query = document.getElementById('searchInput').value.trim().toLowerCase();
+            if (query.length < 3) {
+                showToast('Please enter at least 3 characters', 'warning');
+                return;
+            }
+
+            const mainContent = document.getElementById('mainContent');
+            mainContent.innerHTML = `<div class="loading"><div class="loading-spinner"></div><div>Searching...</div></div>`;
+
+            try {
+                const posts = await apiCall('/forum/posts');
+                const matchedArticles = (wikiArticles || []).filter(article =>
+                    article.name.toLowerCase().includes(query)
+                );
+                const matchedPosts = (posts || []).filter(post =>
+                    (post.title || '').toLowerCase().includes(query) ||
+                    (post.content || '').toLowerCase().includes(query) ||
+                    (post.author || '').toLowerCase().includes(query)
+                );
+
+                mainContent.innerHTML = `
+                    <section class="search-results">
+                        <div class="forum-header">
+                            <span class="section-eyebrow">Search</span>
+                            <h2>Results for "${escapeHtml(query)}"</h2>
+                            <p>${matchedArticles.length + matchedPosts.length} result(s) found across the wiki and forum.</p>
+                        </div>
+
+                        <div class="search-section">
+                            <h3>Wiki Articles</h3>
+                            ${matchedArticles.length ? matchedArticles.map(article => `
+                                <div class="search-result-card">
+                                    <span class="tag">Wiki</span>
+                                    <h4>${escapeHtml(article.name.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase()))}</h4>
+                                    <button class="btn btn-secondary" onclick="loadWikiArticle('${article.name}')">Open Article</button>
+                                </div>
+                            `).join('') : '<p class="empty-state">No wiki articles matched your search.</p>'}
+                        </div>
+
+                        <div class="search-section">
+                            <h3>Forum Posts</h3>
+                            ${matchedPosts.length ? matchedPosts.map(post => `
+                                <div class="search-result-card">
+                                    <span class="tag">Forum</span>
+                                    <h4>${escapeHtml(post.title || 'Untitled')}</h4>
+                                    <p>${escapeHtml((post.content || '').slice(0, 180))}${(post.content || '').length > 180 ? '…' : ''}</p>
+                                    <button class="btn btn-secondary" onclick="viewThread('${post.id}')">Open Thread</button>
+                                </div>
+                            `).join('') : '<p class="empty-state">No forum posts matched your search.</p>'}
+                        </div>
+                    </section>
+                `;
+            } catch (error) {
+                showToast('Search failed: ' + error.message, 'error');
+                showWiki();
+            }
+        }
+
+        function handleSearchKeypress(event) {
+            if (event.key === 'Enter') {
+                performSearch();
+            }
+        }
+
+        function showPrivacy() {
+            showToast('Privacy Policy: No tracking • Your data is private');
+        }
+
+        function showAbout() {
+            showToast('EasyPrivacy: Community-driven privacy education');
+        }
+
+        function showGuidelines() {
+            showToast('Guidelines: Be respectful • No spam • Cite sources');
+        }
+
+        function showGit() {
+            window.open('https://github.com/hollow888/easy-privacy-articles', '_blank');
+        }
+
+        function setupEventListeners() {
+            document.addEventListener('click', function (event) {
+                const dropdown = document.getElementById('userDropdownMenu');
+                const toggle = document.querySelector('.user-dropdown-toggle');
+                if (dropdown && toggle && !toggle.contains(event.target) && !dropdown.contains(event.target)) {
+                    dropdown.classList.remove('show');
+                }
+            });
+        }
+    </script>
+</body>
+
+</html>
