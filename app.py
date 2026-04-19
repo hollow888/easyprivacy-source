@@ -11,17 +11,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 import markdown
 import bleach
 
-@app.route('/', methods=['GET'])
-def serve_index():
-    return send_from_directory('.', 'index.html')
 
-@app.route('/style.css', methods=['GET'])
-def serve_style():
-    return send_from_directory('.', 'style.css')
-
-@app.route('/favicon.ico', methods=['GET'])
-def favicon():
-    return '', 204
 
 # GitHub integration
 try:
@@ -39,6 +29,18 @@ load_dotenv()
 # App config
 
 app = Flask(__name__)
+
+@app.route('/', methods=['GET'])
+def serve_index():
+    return send_from_directory('.', 'index.html')
+
+@app.route('/style.css', methods=['GET'])
+def serve_style():
+    return send_from_directory('.', 'style.css')
+
+@app.route('/favicon.ico', methods=['GET'])
+def favicon():
+    return '', 204
 
 # CORS configuration
 CORS(app, supports_credentials=True)
