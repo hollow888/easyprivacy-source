@@ -1005,7 +1005,7 @@ def vote_on_edit(edit_id):
     
     db.session.commit()
     
-    if edit.votes_for >= 3 and edit.status == 'pending':
+    if edit.votes_for >= 1 and edit.status == 'pending':
         edit.status = 'approved'
         
         if edit.git_pr_url and github_manager and github_manager.authenticated:
@@ -1015,8 +1015,8 @@ def vote_on_edit(edit_id):
                     edit.status = 'merged'
                     edit.merged_at = datetime.utcnow()
                     edit.merged_by = user.id
-            except:
-                pass
+            except Exception as e:
+                print(f"Auto-merge failed for edit {edit.id}: {e}")
         
         db.session.commit()
     
