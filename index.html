@@ -1035,27 +1035,88 @@
             }
         }
 
-        function showHistory(slug) {
-            const mainContent = document.getElementById('mainContent');
-            mainContent.innerHTML = `
-                <div class="wiki-article">
-                    <button class="back-button" onclick="loadWikiArticle('${slug}')">← Back to Article</button>
-                    
-                    <h2>Edit History: ${slug.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}</h2>
-                    
-                    <div class="edit-queue" id="historyList">
-                        <div class="loading">
-                            <div class="loading-spinner"></div>
-                            <div>Loading history...</div>
-                        </div>
-                    </div>
+async function showHistory(slug) {
+    const mainContent = document.getElementById('mainContent');
+    mainContent.innerHTML = `
+        <div class="wiki-article">
+            <button class="back-button" onclick="loadWikiArticle('${slug}')">← Back to Article</button>
+            
+            <h2>Edit History: ${slug.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}</h2>
+            
+            <div class="edit-queue" id="historyList">
+                <div class="loading">
+                    <div class="loading-spinner"></div>
+                    <div>Loading history...</div>
+                </div>
+            </div>
+        </div>
+    `;
+
+    try {
+        const edits = await apiCall(`/wiki/articles/${slug}/history`);
+        const historyList = document.getElementById('historyList');
+
+        if (!edits || edits.length === 0) {
+            historyList.innerHTML = `
+                <div class="empty-state">
+                    <h3>No edit history found</h3>
+                    <p>No recorded edits exist for this article yet.</p>
                 </div>
             `;
-
-            setTimeout(() => {
-                document.getElementById('historyList').innerHTML = '<p class="empty-state">History view coming soon</p>';
-            }, 500);
+            return;
         }
+
+        historyList.innerHTML = edits.map(edit => `
+            <div class="edit-item">
+                <div class="edit-header">
+                    <div>
+                        <h3>${escapeHtml(edit.article_title || slug.replace(/-/g, ' '))}</h3>
+                        <div class="edit-meta">
+                            <span>By: ${escapeHtml(edit.author || 'Unknown')}</span>
+                            <span>•</span>
+                            <span>${edit.created_at ? new Date(edit.created_at).toLocaleString() : 'Unknown date'}</span>
+                            <span>•</span>
+                            <span class="tag">${escapeHtml(edit.status || 'unknown')}</span>
+                        </div>
+                    </div>
+                    <div class="edit-votes">
+                        <span class="vote-count">${edit.votes_for || 0} for / ${edit.votes_against || 0} against</span>
+                    </div>
+                </div>
+
+                <div style="margin-top: 0.75rem;">
+                    <strong>Comment:</strong> ${escapeHtml(edit.edit_comment || 'No comment provided')}
+                </div>
+
+                ${edit.git_pr_url ? `
+                    <div style="margin-top: 0.5rem;">
+                        <a href="${edit.git_pr_url}" target="_blank" class="tag">View Pull Request →</a>
+                    </div>
+                ` : ''}
+
+                ${edit.merged_at ? `
+                    <div style="margin-top: 0.5rem; color: var(--text-secondary);">
+                        Merged: ${new Date(edit.merged_at).toLocaleString()}
+                        ${edit.merged_by_username ? ` by ${escapeHtml(edit.merged_by_username)}` : ''}
+                    </div>
+                ` : ''}
+
+                <details style="margin-top: 1rem;">
+                    <summary style="cursor: pointer; font-weight: 600;">View submitted content</summary>
+                    <div class="article-content" style="margin-top: 1rem;">
+                        ${renderMarkdownSafe(edit.content_after || '')}
+                    </div>
+                </details>
+            </div>
+        `).join('');
+    } catch (error) {
+        document.getElementById('historyList').innerHTML = `
+            <div class="error-message">
+                Failed to load history: ${escapeHtml(error.message)}
+            </div>
+        `;
+    }
+}
 
         // Forum functions
 

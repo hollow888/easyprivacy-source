@@ -920,7 +920,28 @@ def submit_wiki_edit(slug):
         'pr_url': pr.html_url if pr else None,
         'message': 'Edit submitted for review'
     })
+@app.route('/api/wiki/articles/<path:slug>/history', methods=['GET'])
+def get_article_history(slug):
+    slug = slug.replace('.md', '')
 
+    edits = WikiEdit.query.filter_by(article_slug=slug) \
+        .order_by(WikiEdit.created_at.desc()) \
+        .all()
+
+    result = []
+    for edit in edits:
+        edit_dict = edit.to_dict()
+
+        # Add a readable merged_by username if available
+        merged_by_user = None
+        if getattr(edit, 'merged_by', None):
+            merged_by_user = db.session.get(User, edit.merged_by)
+
+        edit_dict['merged_by_username'] = merged_by_user.username if merged_by_user else None
+
+        result.append(edit_dict)
+
+    return jsonify(result)
 @app.route('/api/wiki/edits/pending', methods=['GET'])
 @login_required
 def get_pending_edits():
